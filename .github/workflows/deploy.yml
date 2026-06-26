@@ -1,0 +1,63 @@
+name: Deploy to GitHub Pages
+
+on:
+  # Деплой при пуше в рабочую ветку проекта.
+  push:
+    branches:
+      - claude/crm-device-import-generator-o8rtw6
+      - main
+  # Возможность запустить вручную из вкладки Actions.
+  workflow_dispatch:
+
+# Права, необходимые для публикации на GitHub Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Разрешаем только один параллельный деплой, отменяя предыдущие запуски.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+        with:
+          # Автоматически включает GitHub Pages (источник = GitHub Actions),
+          # если он ещё не включён в настройках репозитория.
+          enablement: true
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
