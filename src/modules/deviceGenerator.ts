@@ -114,6 +114,44 @@ export function defaultRules(template: TemplateStructure): GenerationRule[] {
   });
 }
 
+/**
+ * Возвращает один пример значения для правила — для живого предпросмотра в UI.
+ */
+export function previewValue(
+  rule: GenerationRule,
+  dateFormat: DateFormat | null,
+  generationDate: Date = new Date(),
+): string {
+  switch (rule.strategy) {
+    case 'empty':
+      return '';
+    case 'fixed':
+      return rule.fixedValue ?? '';
+    case 'today':
+      return formatDate(generationDate, dateFormat);
+    case 'codentify':
+      return randomCodentify(
+        rule.codentifyLength && rule.codentifyLength > 0 ? rule.codentifyLength : 12,
+      );
+    case 'randomNumber':
+      return String(randomInt(rule.min ?? 0, rule.max ?? 100));
+    case 'randomPick': {
+      const items = (rule.list ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return items.length ? items[0] : '';
+    }
+    case 'sequence': {
+      const start = rule.start ?? 1;
+      const pad = rule.pad ?? 0;
+      return `${rule.prefix ?? ''}${String(start).padStart(pad, '0')}`;
+    }
+    default:
+      return '';
+  }
+}
+
 /** Вычисляет значение колонки для конкретной строки. */
 function valueForRule(
   rule: GenerationRule,

@@ -244,7 +244,12 @@ export default function App() {
 
           <div className="divider" />
 
-          <RulesPanel rules={rules} onChange={handleRuleChange} />
+          <RulesPanel
+            rules={rules}
+            dateFormat={template.dateFormat}
+            generationDate={generationDate}
+            onChange={handleRuleChange}
+          />
 
           <div className="btn-row" style={{ marginTop: 18 }}>
             <button className="btn btn-dark" onClick={runGenerate} disabled={busy}>
