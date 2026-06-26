@@ -67,6 +67,23 @@ npm run build    # сборка в dist/
 npm run preview  # просмотр сборки
 ```
 
+## Деплой (GitHub Pages)
+
+В репозитории настроен workflow `.github/workflows/deploy.yml`, который при
+пуше в рабочую ветку (или `main`) собирает приложение и публикует его на
+GitHub Pages.
+
+**Однократный шаг (нужен один раз):** включите Pages в настройках
+репозитория —
+`Settings → Pages → Build and deployment → Source = «GitHub Actions»`.
+Токен GitHub Actions не имеет прав создавать сайт Pages автоматически, поэтому
+первый раз источник выбирается вручную. После этого каждый пуш деплоит сайт
+сам.
+
+Запустить деплой можно также вручную: `Actions → Deploy to GitHub Pages → Run
+workflow`. Адрес сайта появится в логе шага deploy и в `Settings → Pages`
+(обычно `https://<owner>.github.io/devices/`).
+
 ## Пример файлов
 
 В каталоге `samples/`:

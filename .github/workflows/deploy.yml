@@ -40,11 +40,9 @@ jobs:
         run: npm run build
 
       - name: Setup Pages
+        # Требуется однократно включить Pages в настройках репозитория:
+        # Settings → Pages → Build and deployment → Source = "GitHub Actions".
         uses: actions/configure-pages@v5
-        with:
-          # Автоматически включает GitHub Pages (источник = GitHub Actions),
-          # если он ещё не включён в настройках репозитория.
-          enablement: true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
