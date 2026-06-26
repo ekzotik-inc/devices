@@ -1,67 +1,59 @@
 /**
- * Главный компонент приложения.
+ * Главный компонент приложения — ГЕНЕРАТОР устройств для импорта в CRM.
  *
- * Управляет шагами процесса:
- *  1. Загрузка шаблона CRM → анализ структуры.
- *  2. Загрузка файла с устройствами (CSV/Excel).
- *  3. Сопоставление колонок.
- *  4. Проверка данных (валидация).
- *  5. Предпросмотр итоговой таблицы.
- *  6. Экспорт CSV строго по шаблону.
+ * Шаги:
+ *  1. Загрузка эталонного шаблона CRM → анализ структуры.
+ *  2. Выбор количества устройств и правил генерации.
+ *  3. Генерация + проверка данных (валидация).
+ *  4. Предпросмотр итоговой таблицы и экспорт CSV строго по шаблону.
  */
 
 import { useCallback, useMemo, useState } from 'react';
 import DropZone from './components/DropZone';
 import StructureCard from './components/StructureCard';
-import MappingPanel from './components/MappingPanel';
+import RulesPanel from './components/RulesPanel';
 import ValidationPanel from './components/ValidationPanel';
 import PreviewTable from './components/PreviewTable';
-import ProgressBar from './components/ProgressBar';
 import { ToastStack, type ToastItem } from './components/Toast';
 import { DownloadIcon, InfoIcon, LogoMark } from './components/icons';
 
-import {
-  detectFileType,
-  readFileAsArrayBuffer,
-  readFileAsText,
-} from './modules/fileLoader';
+import { readFileAsText } from './modules/fileLoader';
 import { analyzeTemplate } from './modules/structureAnalyzer';
-import { autoMap } from './modules/dataProcessor';
-import { buildErrorReport } from './modules/validator';
+import { defaultRules, generateDevices } from './modules/deviceGenerator';
+import { buildErrorReport, validate } from './modules/validator';
 import {
   buildCsvBlob,
   buildExportFileName,
   downloadBlob,
   downloadTextReport,
 } from './modules/csvExporter';
-import { parseDeviceFile, processAndValidate } from './modules/workerClient';
 import type {
-  ColumnMapping,
+  GenerationRule,
   ProcessedData,
-  SourceData,
   TemplateStructure,
   ValidationResult,
 } from './modules/types';
 
 const STEPS = [
   { n: 1, label: 'Шаблон CRM', sub: 'эталонная структура' },
-  { n: 2, label: 'Файл устройств', sub: 'CSV или Excel' },
-  { n: 3, label: 'Сопоставление', sub: 'колонки' },
-  { n: 4, label: 'Проверка', sub: 'валидация' },
-  { n: 5, label: 'Экспорт', sub: 'готовый CSV' },
+  { n: 2, label: 'Параметры', sub: 'кол-во и правила' },
+  { n: 3, label: 'Проверка', sub: 'валидация' },
+  { n: 4, label: 'Экспорт', sub: 'готовый CSV' },
 ];
+
+const PRESET_COUNTS = [10, 50, 100];
 
 export default function App() {
   const [template, setTemplate] = useState<TemplateStructure | null>(null);
   const [templateName, setTemplateName] = useState<string | null>(null);
-  const [source, setSource] = useState<SourceData | null>(null);
-  const [mapping, setMapping] = useState<ColumnMapping>({});
+  const [generationDate, setGenerationDate] = useState<Date>(new Date());
+  const [rules, setRules] = useState<GenerationRule[]>([]);
+  const [count, setCount] = useState<number>(10);
+
   const [processed, setProcessed] = useState<ProcessedData | null>(null);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
 
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<{ stage: string; percent: number } | null>(null);
-  const [trimWhitespace, setTrimWhitespace] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   const toast = useCallback((type: ToastItem['type'], message: string) => {
@@ -80,91 +72,51 @@ export default function App() {
         toast('error', 'Не удалось прочитать колонки шаблона');
         return;
       }
+      const now = new Date();
       setTemplate(structure);
       setTemplateName(file.name);
-      // Сброс зависящих от шаблона данных.
+      setGenerationDate(now);
+      setRules(defaultRules(structure));
       setProcessed(null);
       setValidation(null);
-      if (source) {
-        setMapping(autoMap(structure, source));
-      }
       toast('success', `Шаблон проанализирован: ${structure.columns.length} колонок`);
     } catch (e) {
       toast('error', `Ошибка чтения шаблона: ${(e as Error).message}`);
     }
   };
 
-  // --- Шаг 2: файл устройств ---
-  const handleDeviceFile = async (file: File) => {
-    const fileType = detectFileType(file.name);
-    if (fileType === 'unknown') {
-      toast('error', 'Поддерживаются только файлы .csv и .xlsx');
+  const handleRuleChange = (index: number, rule: GenerationRule) => {
+    setRules((prev) => prev.map((r, i) => (i === index ? rule : r)));
+    setProcessed(null);
+    setValidation(null);
+  };
+
+  // --- Шаг 2→3: генерация и валидация ---
+  const runGenerate = () => {
+    if (!template) return;
+    if (count < 1) {
+      toast('error', 'Укажите количество устройств (минимум 1)');
       return;
     }
     setBusy(true);
-    setProgress({ stage: 'Чтение файла', percent: 2 });
-    try {
-      let result: SourceData;
-      if (fileType === 'xlsx') {
-        const buffer = await readFileAsArrayBuffer(file);
-        result = await parseDeviceFile(
-          { buffer, fileName: file.name, fileType: 'xlsx' },
-          setProgress,
-        );
-      } else {
-        const text = await readFileAsText(file);
-        result = await parseDeviceFile(
-          { text, fileName: file.name, fileType: 'csv' },
-          setProgress,
-        );
+    // Микрозадержка, чтобы успел отрисоваться индикатор для больших объёмов.
+    setTimeout(() => {
+      try {
+        const data = generateDevices(template, { count, rules, generationDate });
+        const val = validate(template, data, rules);
+        setProcessed(data);
+        setValidation(val);
+        if (val.errorCount === 0) {
+          toast('success', `Сгенерировано устройств: ${count} — готово к экспорту`);
+        } else {
+          toast('info', `Сгенерировано, но найдено ошибок: ${val.errorCount}`);
+        }
+      } catch (e) {
+        toast('error', `Ошибка генерации: ${(e as Error).message}`);
+      } finally {
+        setBusy(false);
       }
-      setSource(result);
-      setProcessed(null);
-      setValidation(null);
-      if (template) {
-        setMapping(autoMap(template, result));
-      }
-      toast('success', `Загружено строк: ${result.rows.length.toLocaleString('ru-RU')}`);
-    } catch (e) {
-      toast('error', `Ошибка обработки файла: ${(e as Error).message}`);
-    } finally {
-      setBusy(false);
-      setProgress(null);
-    }
-  };
-
-  // --- Шаг 3+4: обработка и валидация ---
-  const runProcess = async () => {
-    if (!template || !source) return;
-    setBusy(true);
-    setProgress({ stage: 'Подготовка', percent: 2 });
-    try {
-      const { data, validation: val } = await processAndValidate(
-        template,
-        mapping,
-        { trimWhitespace, expectedRowCount: null },
-        setProgress,
-      );
-      setProcessed(data);
-      setValidation(val);
-      if (val.errorCount === 0) {
-        toast('success', 'Проверка пройдена — данные готовы к экспорту');
-      } else {
-        toast('info', `Проверка завершена: найдено ошибок — ${val.errorCount}`);
-      }
-    } catch (e) {
-      toast('error', `Ошибка обработки: ${(e as Error).message}`);
-    } finally {
-      setBusy(false);
-      setProgress(null);
-    }
-  };
-
-  const handleMappingChange = (col: string, src: string | null) => {
-    setMapping((prev) => ({ ...prev, [col]: src }));
-    // Изменение карты требует повторной обработки.
-    setProcessed(null);
-    setValidation(null);
+    }, 30);
   };
 
   // --- Экспорт ---
@@ -181,20 +133,18 @@ export default function App() {
   };
 
   const handleDownloadReport = () => {
-    if (!validation || !template || !source) return;
-    const report = buildErrorReport(validation, template, source.fileName);
+    if (!validation || !template) return;
+    const report = buildErrorReport(validation, template, processed?.rows.length ?? 0);
     downloadTextReport(report, `report_${new Date().toISOString().slice(0, 10)}.txt`);
     toast('info', 'Отчёт об ошибках скачан');
   };
 
-  // --- Состояние шагов ---
   const currentStep = useMemo(() => {
     if (!template) return 1;
-    if (!source) return 2;
-    if (!processed) return 3;
-    if (validation && validation.errorCount > 0) return 4;
-    return 5;
-  }, [template, source, processed, validation]);
+    if (!processed) return 2;
+    if (validation && validation.errorCount > 0) return 3;
+    return 4;
+  }, [template, processed, validation]);
 
   const canExport = !!(template && processed && validation?.canExport);
 
@@ -205,8 +155,8 @@ export default function App() {
           <LogoMark />
         </div>
         <div className="app-title">
-          <h1>CRM Device Import</h1>
-          <p>Подготовка файлов импорта устройств — строго по шаблону CRM</p>
+          <h1>CRM Device Generator</h1>
+          <p>Генерация устройств для импорта в CRM — строго по структуре шаблона</p>
         </div>
       </header>
       <div className="brand-bar" />
@@ -232,7 +182,9 @@ export default function App() {
         <div className="card-head">
           <div>
             <h2>Шаг 1 · Загрузка шаблона CRM</h2>
-            <p className="hint">Эталонный CSV. Его структура — единственный источник истины при экспорте.</p>
+            <p className="hint">
+              Эталонный CSV из CRM. Его структура — единственный источник истины при экспорте.
+            </p>
           </div>
         </div>
         <DropZone
@@ -251,80 +203,67 @@ export default function App() {
         )}
       </div>
 
-      {/* Шаг 2: устройства */}
-      <div className="card">
-        <div className="card-head">
-          <div>
-            <h2>Шаг 2 · Загрузка файла устройств</h2>
-            <p className="hint">Excel (.xlsx) или CSV. Большие файлы обрабатываются в фоне.</p>
-          </div>
-        </div>
-        <DropZone
-          title="Перетащите файл устройств сюда"
-          hint="или нажмите для выбора (.xlsx, .csv)"
-          accept=".csv,.xlsx,.xls,text/csv"
-          fileName={source?.fileName}
-          loaded={!!source}
-          disabled={!template || busy}
-          onFile={handleDeviceFile}
-        />
-        {!template && (
-          <div className="notice" style={{ marginTop: 14 }}>
-            <InfoIcon />
-            Сначала загрузите шаблон CRM (шаг 1).
-          </div>
-        )}
-        {source && (
-          <p className="muted" style={{ marginTop: 12 }}>
-            Прочитано колонок: {source.headers.length} · строк: {source.rows.length.toLocaleString('ru-RU')}
-          </p>
-        )}
-      </div>
-
-      {/* Шаг 3: сопоставление */}
-      {template && source && (
+      {/* Шаг 2: количество + правила */}
+      {template && (
         <div className="card">
           <div className="card-head">
             <div>
-              <h2>Шаг 3 · Сопоставление колонок</h2>
-              <p className="hint">Совпадения определены автоматически. При необходимости измените вручную.</p>
+              <h2>Шаг 2 · Количество и правила генерации</h2>
+              <p className="hint">Сколько устройств сгенерировать и чем заполнять колонки.</p>
             </div>
           </div>
-          <MappingPanel
-            template={template}
-            source={source}
-            mapping={mapping}
-            onChange={handleMappingChange}
-          />
-          <div className="toggle-row">
+
+          <div className="count-row">
+            <span className="count-label">Количество устройств:</span>
+            {PRESET_COUNTS.map((c) => (
+              <button
+                key={c}
+                className={`btn ${count === c ? 'btn-dark' : 'btn-ghost'}`}
+                onClick={() => {
+                  setCount(c);
+                  setProcessed(null);
+                  setValidation(null);
+                }}
+              >
+                {c}
+              </button>
+            ))}
             <input
-              type="checkbox"
-              id="trim"
-              checked={trimWhitespace}
+              className="count-input"
+              type="number"
+              min={1}
+              max={1000000}
+              value={count}
               onChange={(e) => {
-                setTrimWhitespace(e.target.checked);
+                setCount(Math.max(1, Number(e.target.value) || 0));
                 setProcessed(null);
                 setValidation(null);
               }}
             />
-            <label htmlFor="trim">Обрезать лишние пробелы в значениях при формировании</label>
           </div>
+
+          <div className="divider" />
+
+          <RulesPanel rules={rules} onChange={handleRuleChange} />
+
           <div className="btn-row" style={{ marginTop: 18 }}>
-            <button className="btn btn-dark" onClick={runProcess} disabled={busy}>
+            <button className="btn btn-dark" onClick={runGenerate} disabled={busy}>
               {busy ? <span className="spinner" /> : null}
-              Обработать и проверить
+              Сгенерировать и проверить
             </button>
+            <span className="muted">
+              packing_date = {generationDate.toLocaleDateString('ru-RU')} (дата загрузки файла)
+            </span>
           </div>
-          {progress && <ProgressBar stage={progress.stage} percent={progress.percent} />}
         </div>
       )}
 
-      {/* Шаг 4: валидация */}
+      {/* Шаг 3: валидация */}
       {validation && processed && (
         <div className="card">
           <div className="card-head">
             <div>
-              <h2>Шаг 4 · Проверка данных</h2>
+              <h2>Шаг 3 · Проверка данных</h2>
               <p className="hint">Журнал найденных проблем с понятными сообщениями.</p>
             </div>
           </div>
@@ -336,13 +275,15 @@ export default function App() {
         </div>
       )}
 
-      {/* Шаг 5: предпросмотр + экспорт */}
+      {/* Шаг 4: предпросмотр + экспорт */}
       {processed && template && (
         <div className="card">
           <div className="card-head">
             <div>
-              <h2>Шаг 5 · Предпросмотр и экспорт</h2>
-              <p className="hint">Это именно тот файл, который будет выгружен. Колонки и порядок — как в шаблоне.</p>
+              <h2>Шаг 4 · Предпросмотр и экспорт</h2>
+              <p className="hint">
+                Это именно тот файл, который будет выгружен. Колонки и порядок — как в шаблоне.
+              </p>
             </div>
             <button className="btn btn-primary" onClick={handleExport} disabled={!canExport}>
               <DownloadIcon /> Сформировать CSV
@@ -351,7 +292,7 @@ export default function App() {
           {!canExport && (
             <div className="notice" style={{ marginBottom: 16 }}>
               <InfoIcon />
-              Экспорт недоступен: исправьте структурные ошибки шаблона и убедитесь, что есть строки данных.
+              Экспорт недоступен: исправьте ошибки валидации.
             </div>
           )}
           <PreviewTable data={processed} />

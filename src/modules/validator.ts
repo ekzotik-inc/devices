@@ -1,38 +1,24 @@
 /**
- * Модуль проверки данных (валидация).
+ * Модуль проверки сгенерированных данных (валидация).
  *
  * Проверяет:
- *  - наличие обязательных колонок в шаблоне;
- *  - обязательные поля;
- *  - дубли кодов устройств;
- *  - пустые значения;
+ *  - количество строк;
+ *  - дубли кодов (codentify);
+ *  - пустые значения там, где по правилу должно быть заполнено;
  *  - неверный формат даты (packing_date);
- *  - лишние пробелы;
- *  - количество строк.
+ *  - лишние пробелы.
  *
  * Все сообщения формулируются понятным пользователю языком.
  */
 
 import type {
   DateFormat,
+  GenerationRule,
   ProcessedData,
   TemplateStructure,
   ValidationIssue,
   ValidationResult,
 } from './types';
-
-/** Обязательные колонки, которые должны присутствовать в шаблоне. */
-export const REQUIRED_COLUMNS = [
-  'KIT_ILUMA_I_ONE_code',
-  'holder_code',
-  'market_code',
-];
-
-/** Колонки, формирующие уникальный код устройства (для поиска дублей). */
-export const DEVICE_CODE_COLUMNS = ['KIT_ILUMA_I_ONE_codentify', 'KIT_ILUMA_I_ONE_code'];
-
-/** Поля, которые обязательно должны быть заполнены в каждой строке. */
-export const REQUIRED_FIELDS = ['KIT_ILUMA_I_ONE_code', 'market_code'];
 
 const DATE_REGEX: Record<DateFormat, RegExp> = {
   'YYYY-MM-DD': /^\d{4}-\d{2}-\d{2}$/,
@@ -76,59 +62,48 @@ function isValidDate(value: string, format: DateFormat): boolean {
   return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
 }
 
-/** Проверяет наличие крайних пробелов. */
-function hasEdgeWhitespace(value: string): boolean {
-  return value.length !== value.trim().length;
+/** Признак codentify-колонки. */
+function isCodentifyColumn(name: string): boolean {
+  return name.toLowerCase().includes('codentify');
 }
 
 /**
- * Основная функция валидации.
- * expectedRowCount — ожидаемое количество строк (если задано пользователем).
+ * Валидация сгенерированных данных с учётом правил генерации.
  */
 export function validate(
   template: TemplateStructure,
   data: ProcessedData,
-  options: { expectedRowCount?: number | null; maxIssuesPerType?: number } = {},
+  rules: GenerationRule[],
+  options: { maxIssuesPerType?: number } = {},
 ): ValidationResult {
-  const { expectedRowCount = null, maxIssuesPerType = 500 } = options;
+  const { maxIssuesPerType = 500 } = options;
   const issues: ValidationIssue[] = [];
+  const ruleByColumn = new Map(rules.map((r) => [r.column, r]));
 
-  // 1. Проверка наличия обязательных колонок в шаблоне.
-  for (const col of REQUIRED_COLUMNS) {
-    if (!template.columns.includes(col)) {
-      issues.push({
-        type: 'missing_column',
-        severity: 'error',
-        row: null,
-        column: col,
-        message: `Отсутствует колонка ${col}`,
-      });
-    }
-  }
-
-  // 2. Количество строк.
+  // 1. Количество строк.
   if (data.rows.length === 0) {
     issues.push({
       type: 'row_count',
       severity: 'error',
       row: null,
       column: null,
-      message: 'Файл с устройствами не содержит строк данных',
-    });
-  } else if (expectedRowCount != null && data.rows.length !== expectedRowCount) {
-    issues.push({
-      type: 'row_count',
-      severity: 'warning',
-      row: null,
-      column: null,
-      message: `Количество строк (${data.rows.length}) не совпадает с ожидаемым (${expectedRowCount})`,
+      message: 'Не задано количество устройств для генерации',
     });
   }
 
   const dateFormat = template.dateFormat;
   const hasPackingDate = template.columns.includes('packing_date');
-  const codeColumn = DEVICE_CODE_COLUMNS.find((c) => template.columns.includes(c));
-  const seenCodes = new Map<string, number>();
+  // Колонки, которые по правилам не должны быть пустыми.
+  const requiredColumns = template.columns.filter((c) => {
+    const r = ruleByColumn.get(c);
+    if (!r) return false;
+    if (r.strategy === 'empty') return false;
+    if (r.strategy === 'fixed' && (r.fixedValue ?? '') === '') return false;
+    return true;
+  });
+  const codentifyColumns = template.columns.filter(isCodentifyColumn);
+  const seenByColumn = new Map<string, Map<string, number>>();
+  for (const c of codentifyColumns) seenByColumn.set(c, new Map());
 
   const counters: Record<string, number> = {};
   const bump = (key: string): boolean => {
@@ -136,71 +111,68 @@ export function validate(
     return counters[key] <= maxIssuesPerType;
   };
 
-  // 3. Построчная проверка.
+  // 2. Построчная проверка.
   for (let i = 0; i < data.rows.length; i++) {
     const row = data.rows[i];
     const rowNum = i + 1;
 
-    // 3a. Обязательные поля.
-    for (const field of REQUIRED_FIELDS) {
-      if (!template.columns.includes(field)) continue;
-      const value = (row[field] ?? '').trim();
+    // 2a. Обязательные (по правилу) поля заполнены.
+    for (const col of requiredColumns) {
+      const value = (row[col] ?? '').trim();
       if (value === '') {
         if (bump('missing_required')) {
           issues.push({
             type: 'missing_required',
             severity: 'error',
             row: rowNum,
-            column: field,
-            message: `Строка ${rowNum}: не заполнено поле ${field}`,
+            column: col,
+            message: `Строка ${rowNum}: не заполнено поле ${col}`,
           });
         }
       }
     }
 
-    // 3b. Дубли кодов устройств.
-    if (codeColumn) {
-      const code = (row[codeColumn] ?? '').trim();
-      if (code !== '') {
-        const prev = seenCodes.get(code);
-        if (prev !== undefined) {
-          if (bump('duplicate_code')) {
-            issues.push({
-              type: 'duplicate_code',
-              severity: 'error',
-              row: rowNum,
-              column: codeColumn,
-              message: `Строка ${rowNum}: обнаружен повторный код устройства «${code}» (впервые в строке ${prev})`,
-            });
-          }
-        } else {
-          seenCodes.set(code, rowNum);
+    // 2b. Дубли codentify.
+    for (const col of codentifyColumns) {
+      const code = (row[col] ?? '').trim();
+      if (code === '') continue;
+      const seen = seenByColumn.get(col)!;
+      const prev = seen.get(code);
+      if (prev !== undefined) {
+        if (bump('duplicate_code')) {
+          issues.push({
+            type: 'duplicate_code',
+            severity: 'error',
+            row: rowNum,
+            column: col,
+            message: `Строка ${rowNum}: повторный код ${col} «${code}» (впервые в строке ${prev})`,
+          });
         }
+      } else {
+        seen.set(code, rowNum);
       }
     }
 
-    // 3c. Формат даты packing_date.
-    if (hasPackingDate) {
+    // 2c. Формат даты packing_date.
+    if (hasPackingDate && dateFormat) {
       const dateVal = (row['packing_date'] ?? '').trim();
-      if (dateVal !== '' && dateFormat) {
-        if (!isValidDate(dateVal, dateFormat)) {
-          if (bump('invalid_date')) {
-            issues.push({
-              type: 'invalid_date',
-              severity: 'error',
-              row: rowNum,
-              column: 'packing_date',
-              message: `Строка ${rowNum}: неверный формат packing_date «${dateVal}» (ожидается ${dateFormat})`,
-            });
-          }
+      if (dateVal !== '' && !isValidDate(dateVal, dateFormat)) {
+        if (bump('invalid_date')) {
+          issues.push({
+            type: 'invalid_date',
+            severity: 'error',
+            row: rowNum,
+            column: 'packing_date',
+            message: `Строка ${rowNum}: неверный формат packing_date «${dateVal}» (ожидается ${dateFormat})`,
+          });
         }
       }
     }
 
-    // 3d. Лишние пробелы и пустые значения (предупреждения).
+    // 2d. Лишние пробелы.
     for (const col of data.columns) {
       const value = row[col] ?? '';
-      if (hasEdgeWhitespace(value)) {
+      if (value.length !== value.trim().length) {
         if (bump('whitespace')) {
           issues.push({
             type: 'whitespace',
@@ -214,7 +186,6 @@ export function validate(
     }
   }
 
-  // Если каких-то типов проблем было больше лимита — добавим итоговую заметку.
   for (const [key, count] of Object.entries(counters)) {
     if (count > maxIssuesPerType) {
       issues.push({
@@ -229,14 +200,12 @@ export function validate(
 
   const errorCount = issues.filter((i) => i.severity === 'error').length;
   const warningCount = issues.filter((i) => i.severity === 'warning').length;
-  const hasStructuralError = issues.some((i) => i.type === 'missing_column');
 
   return {
     issues,
     errorCount,
     warningCount,
-    // Экспорт блокируем только при структурных ошибках шаблона.
-    canExport: !hasStructuralError && data.rows.length > 0,
+    canExport: data.rows.length > 0 && errorCount === 0,
   };
 }
 
@@ -244,14 +213,14 @@ export function validate(
 export function buildErrorReport(
   result: ValidationResult,
   template: TemplateStructure,
-  sourceFileName: string,
+  count: number,
 ): string {
   const lines: string[] = [];
-  lines.push('ОТЧЁТ О ПРОВЕРКЕ ДАННЫХ');
-  lines.push('========================');
+  lines.push('ОТЧЁТ О ПРОВЕРКЕ СГЕНЕРИРОВАННЫХ ДАННЫХ');
+  lines.push('========================================');
   lines.push(`Дата: ${new Date().toLocaleString('ru-RU')}`);
   lines.push(`Шаблон: ${template.fileName}`);
-  lines.push(`Файл устройств: ${sourceFileName}`);
+  lines.push(`Сгенерировано устройств: ${count}`);
   lines.push(`Ошибок: ${result.errorCount}`);
   lines.push(`Предупреждений: ${result.warningCount}`);
   lines.push('');

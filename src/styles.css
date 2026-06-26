@@ -379,6 +379,89 @@ select.empty {
   border-style: dashed;
 }
 
+/* ---------- Count selector ---------- */
+.count-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.count-label {
+  font-weight: 600;
+  font-size: 14px;
+  margin-right: 4px;
+}
+
+.count-input {
+  width: 120px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.count-input:focus {
+  outline: none;
+  border-color: var(--turquoise);
+}
+
+/* ---------- Rules ---------- */
+.rule-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.3fr;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.rule-row:last-child {
+  border-bottom: none;
+}
+
+.rule-col {
+  font-weight: 600;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.rule-params {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rule-params input[type='text'],
+.rule-params input[type='number'] {
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  font-family: inherit;
+  width: 100%;
+  max-width: 200px;
+}
+
+.rule-params input:focus {
+  outline: none;
+  border-color: var(--turquoise);
+}
+
+.rule-params .param {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.rule-params .param input {
+  width: 70px;
+}
+
 /* ---------- Buttons ---------- */
 .btn {
   border: none;
@@ -832,12 +915,9 @@ td.cell-empty {
 }
 
 @media (max-width: 640px) {
-  .map-row {
+  .rule-row {
     grid-template-columns: 1fr;
     gap: 6px;
-  }
-  .map-arrow {
-    display: none;
   }
   .app {
     padding: 20px 14px 60px;

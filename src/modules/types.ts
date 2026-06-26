@@ -1,13 +1,24 @@
 /**
  * Общие типы данных приложения.
  *
- * Главный принцип: структура CSV (колонки, порядок, разделители, кодировка,
- * перенос строк, кавычки) берётся ИСКЛЮЧИТЕЛЬНО из загруженного шаблона и
- * описывается объектом TemplateStructure. Никогда не генерируем CSV «по памяти».
+ * Приложение работает как ГЕНЕРАТОР: пользователь загружает только эталонный
+ * CSV-шаблон CRM, а приложение по его структуре генерирует N случайных
+ * устройств по заданным правилам. Структура итогового файла (колонки, порядок,
+ * разделители, кодировка, перенос строк, кавычки) берётся ИСКЛЮЧИТЕЛЬНО из
+ * шаблона — CSV никогда не генерируется «по памяти».
  */
 
 /** Тип разделителя строк в файле. */
 export type LineEnding = '\r\n' | '\n' | '\r';
+
+/** Поддерживаемые форматы дат. */
+export type DateFormat =
+  | 'YYYY-MM-DD'
+  | 'DD.MM.YYYY'
+  | 'DD/MM/YYYY'
+  | 'MM/DD/YYYY'
+  | 'YYYY/MM/DD'
+  | 'DD-MM-YYYY';
 
 /**
  * Полное описание структуры эталонного CSV-шаблона CRM.
@@ -39,32 +50,53 @@ export interface TemplateStructure {
   sampleRowCount: number;
 }
 
-/** Поддерживаемые форматы дат. */
-export type DateFormat =
-  | 'YYYY-MM-DD'
-  | 'DD.MM.YYYY'
-  | 'DD/MM/YYYY'
-  | 'MM/DD/YYYY'
-  | 'YYYY/MM/DD'
-  | 'DD-MM-YYYY';
+/** Стратегия генерации значения для колонки. */
+export type GenerationStrategy =
+  /** Всегда пусто. */
+  | 'empty'
+  /** Фиксированное значение. */
+  | 'fixed'
+  /** Дата генерации (загрузки файла) в формате шаблона. */
+  | 'today'
+  /** Случайный уникальный код Codentify (буквы+цифры). */
+  | 'codentify'
+  /** Случайное целое число в диапазоне [min, max]. */
+  | 'randomNumber'
+  /** Случайный выбор из списка значений. */
+  | 'randomPick'
+  /** Порядковый номер: prefix + дополненный нулями индекс. */
+  | 'sequence';
 
-/** Результат чтения файла с устройствами. */
-export interface SourceData {
-  /** Заголовки колонок исходного файла. */
-  headers: string[];
-  /** Строки данных как массив объектов { columnName: value }. */
-  rows: Record<string, string>[];
-  /** Имя исходного файла. */
-  fileName: string;
-  /** Тип исходного файла. */
-  fileType: 'csv' | 'xlsx';
+/** Правило генерации значения для одной колонки шаблона. */
+export interface GenerationRule {
+  /** Колонка шаблона. */
+  column: string;
+  /** Выбранная стратегия. */
+  strategy: GenerationStrategy;
+  /** Значение для стратегии 'fixed'. */
+  fixedValue?: string;
+  /** Длина кода для стратегии 'codentify'. */
+  codentifyLength?: number;
+  /** Диапазон для стратегии 'randomNumber'. */
+  min?: number;
+  max?: number;
+  /** Список значений (через запятую) для стратегии 'randomPick'. */
+  list?: string;
+  /** Параметры стратегии 'sequence'. */
+  prefix?: string;
+  pad?: number;
+  start?: number;
 }
 
-/**
- * Карта соответствия: для каждой колонки шаблона указывает имя колонки
- * исходного файла, из которой берутся значения. null — оставить пустым.
- */
-export type ColumnMapping = Record<string, string | null>;
+/** Полная конфигурация генерации. */
+export interface GenerationConfig {
+  /** Сколько устройств сгенерировать. */
+  count: number;
+  /** Правила по колонкам. */
+  rules: GenerationRule[];
+  /** Дата генерации (используется стратегией 'today'). */
+  generationDate: Date;
+}
 
 /** Категория проблемы валидации. */
 export type IssueSeverity = 'error' | 'warning';
@@ -97,7 +129,7 @@ export interface ValidationResult {
   issues: ValidationIssue[];
   errorCount: number;
   warningCount: number;
-  /** Можно ли экспортировать (нет блокирующих ошибок структуры). */
+  /** Можно ли экспортировать. */
   canExport: boolean;
 }
 
@@ -107,12 +139,4 @@ export interface ProcessedData {
   columns: string[];
   /** Строки: каждая — объект { templateColumn: value }. */
   rows: Record<string, string>[];
-}
-
-/** Сообщение прогресса от воркера. */
-export interface ProgressMessage {
-  stage: string;
-  processed: number;
-  total: number;
-  percent: number;
 }
