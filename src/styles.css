@@ -23,9 +23,15 @@
   --success-soft: #e7f8f1;
   --radius: 18px;
   --radius-sm: 12px;
-  --shadow: 0 12px 40px rgba(52, 48, 61, 0.08);
-  --shadow-sm: 0 4px 16px rgba(52, 48, 61, 0.06);
+  /* Многослойные тени дают глубину и хорошо ложатся на любой фон
+     (предпочтительнее границ). Hover — те же тени, но чуть темнее. */
+  --shadow-sm: 0 1px 2px rgba(52, 48, 61, 0.05), 0 2px 6px rgba(52, 48, 61, 0.05);
+  --shadow: 0 1px 2px rgba(52, 48, 61, 0.06), 0 6px 16px rgba(52, 48, 61, 0.08),
+    0 12px 32px rgba(52, 48, 61, 0.06);
+  --shadow-hover: 0 2px 4px rgba(52, 48, 61, 0.1), 0 10px 24px rgba(52, 48, 61, 0.12),
+    0 18px 44px rgba(52, 48, 61, 0.1);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-enter: cubic-bezier(0.25, 0.46, 0.45, 0.94);
   font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
@@ -39,7 +45,36 @@ body {
   padding: 0;
   background: var(--bg);
   color: var(--text);
+  /* Более тонкий и чёткий рендер текста (особенно на macOS). */
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Числа равной ширины — не «прыгают» при обновлении. */
+.count-badge,
+.stat .n,
+.rownum,
+.progress-label,
+.count-input,
+.chip .idx,
+thead th,
+tbody td {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Заголовки распределяются по строкам равномерно; абзацы — без «висячих» слов. */
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+p,
+.hint,
+.muted,
+.dropzone p {
+  text-wrap: pretty;
 }
 
 #root {
@@ -152,6 +187,21 @@ button {
 .step.done .step-num {
   background: var(--success);
   color: #fff;
+  /* Контекстное появление галочки: scale + opacity + blur. */
+  animation: iconIn 0.4s var(--ease-enter) both;
+}
+
+@keyframes iconIn {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
 }
 
 .step-label {
@@ -171,22 +221,44 @@ button {
 /* ---------- Card ---------- */
 .card {
   background: var(--card);
-  border: 1px solid var(--border);
+  /* Тень вместо границы — больше глубины, мягкий контур. */
+  border: 1px solid rgba(231, 230, 234, 0.6);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
   padding: 26px;
   margin-bottom: 22px;
-  animation: rise 0.4s var(--ease);
+  animation: rise 0.5s var(--ease-enter) both;
+  transition: box-shadow 0.3s var(--ease), transform 0.3s var(--ease);
+}
+
+.card:hover {
+  box-shadow: var(--shadow);
+}
+
+/* Ступенчатое появление карточек. */
+.card:nth-of-type(1) {
+  animation-delay: 0ms;
+}
+.card:nth-of-type(2) {
+  animation-delay: 80ms;
+}
+.card:nth-of-type(3) {
+  animation-delay: 160ms;
+}
+.card:nth-of-type(4) {
+  animation-delay: 240ms;
 }
 
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(14px);
+    filter: blur(2px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
+    filter: blur(0);
   }
 }
 
@@ -286,6 +358,26 @@ button {
   background: var(--bg);
   border-radius: var(--radius-sm);
   padding: 12px 14px;
+  animation: popIn 0.4s var(--ease-enter) both;
+}
+
+/* Ступенчатое появление плиток структуры. */
+.struct-item:nth-child(1) { animation-delay: 60ms; }
+.struct-item:nth-child(2) { animation-delay: 120ms; }
+.struct-item:nth-child(3) { animation-delay: 180ms; }
+.struct-item:nth-child(4) { animation-delay: 240ms; }
+.struct-item:nth-child(5) { animation-delay: 300ms; }
+.struct-item:nth-child(6) { animation-delay: 360ms; }
+
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .struct-item .k {
@@ -332,31 +424,7 @@ button {
   font-size: 10px;
 }
 
-/* ---------- Mapping ---------- */
-.map-row {
-  display: grid;
-  grid-template-columns: 1fr 28px 1fr;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.map-row:last-child {
-  border-bottom: none;
-}
-
-.map-target {
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.map-arrow {
-  color: var(--turquoise);
-  text-align: center;
-  font-size: 18px;
-}
-
+/* ---------- Selects & focus ---------- */
 select {
   width: 100%;
   padding: 9px 12px;
@@ -366,17 +434,28 @@ select {
   font-size: 13px;
   font-family: inherit;
   color: var(--text);
-  transition: border-color 0.2s;
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
 
-select:focus {
+select:focus,
+select:focus-visible {
   outline: none;
   border-color: var(--turquoise);
+  box-shadow: 0 0 0 3px var(--turquoise-soft);
 }
 
 select.empty {
   color: var(--text-soft);
   border-style: dashed;
+}
+
+/* Единое кольцо фокуса для всех интерактивных элементов (доступность). */
+input:focus-visible,
+button:focus-visible,
+.dropzone:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--turquoise-soft);
+  border-color: var(--turquoise);
 }
 
 /* ---------- Count selector ---------- */
@@ -469,31 +548,48 @@ select.empty {
   padding: 12px 22px;
   font-size: 14px;
   font-weight: 700;
-  transition: all 0.25s var(--ease);
+  transition: background 0.2s var(--ease), color 0.2s var(--ease),
+    box-shadow 0.2s var(--ease), transform 0.12s var(--ease);
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  /* Текст кнопки нельзя случайно выделить при клике. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Оптическое выравнивание: иконка слева чуть «съедает» отступ,
+   чтобы зрительно блок «иконка+текст» был отцентрован. */
+.btn svg:first-child {
+  margin-left: -3px;
+}
+.btn svg:last-child {
+  margin-right: -3px;
 }
 
 .btn-primary {
   background: var(--turquoise);
   color: #06343a;
+  box-shadow: 0 1px 2px rgba(0, 168, 169, 0.25), 0 6px 16px rgba(0, 168, 169, 0.22);
 }
 
 .btn-primary:hover:not(:disabled) {
   background: var(--turquoise-dark);
   color: #fff;
   transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 168, 169, 0.3), 0 10px 22px rgba(0, 168, 169, 0.3);
 }
 
 .btn-dark {
   background: var(--slate);
   color: #fff;
+  box-shadow: 0 1px 2px rgba(52, 48, 61, 0.22), 0 6px 16px rgba(52, 48, 61, 0.18);
 }
 
 .btn-dark:hover:not(:disabled) {
   background: var(--slate-2);
   transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(52, 48, 61, 0.28), 0 10px 22px rgba(52, 48, 61, 0.24);
 }
 
 .btn-ghost {
@@ -505,6 +601,11 @@ select.empty {
 .btn-ghost:hover:not(:disabled) {
   border-color: var(--turquoise);
   color: var(--turquoise-dark);
+}
+
+/* Нажатие — кнопка слегка «вдавливается». */
+.btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
 }
 
 .btn:disabled {
@@ -847,7 +948,18 @@ td.cell-empty {
   font-weight: 600;
   min-width: 260px;
   border-left: 4px solid var(--turquoise);
-  animation: slidein 0.35s var(--ease);
+  animation: slidein 0.35s var(--ease-enter) both;
+  transition: box-shadow 0.2s var(--ease);
+  will-change: transform, opacity, filter;
+}
+
+.toast:hover {
+  box-shadow: var(--shadow-hover);
+}
+
+/* Уход тише входа: только прозрачность + размытие, без резкого сдвига. */
+.toast.leaving {
+  animation: toastOut 0.24s var(--ease) forwards;
 }
 
 .toast.success {
@@ -863,11 +975,24 @@ td.cell-empty {
 @keyframes slidein {
   from {
     opacity: 0;
-    transform: translateX(40px);
+    transform: translateX(40px) scale(0.96);
+    filter: blur(3px);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes toastOut {
+  from {
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    filter: blur(4px);
   }
 }
 
@@ -914,6 +1039,23 @@ td.cell-empty {
   margin-top: 1px;
 }
 
+/* Тонкие тени-разделители вместо жёсткой линии — мягче и с глубиной. */
+.notice {
+  box-shadow: inset 0 0 0 1px rgba(0, 168, 169, 0.12);
+}
+
+/* Строки таблицы и поля реагируют плавно (прерываемые transition'ы). */
+tbody tr {
+  transition: background 0.15s var(--ease);
+}
+
+input[type='text'],
+input[type='number'],
+.search-box input,
+.count-input {
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+
 @media (max-width: 640px) {
   .rule-row {
     grid-template-columns: 1fr;
@@ -921,5 +1063,17 @@ td.cell-empty {
   }
   .app {
     padding: 20px 14px 60px;
+  }
+}
+
+/* Уважаем системную настройку «меньше движения». */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }
